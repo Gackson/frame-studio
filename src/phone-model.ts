@@ -41,7 +41,7 @@ export async function loadPhoneModel(
   const group = new THREE.Group();
   group.name = config.name;
   const finishes: { material: THREE.MeshStandardMaterial; kind: string }[] = [];
-  const island: THREE.Mesh[] = [];
+
   const originalMaterials = new Set<THREE.Material>();
   const originalTextures = new Set<THREE.Texture>();
   const originalGeometries = new Set<THREE.BufferGeometry>();
@@ -94,14 +94,24 @@ export async function loadPhoneModel(
       geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
       material = display;
     } else if (kind === "2112" || kind === "Lens2") {
-      // These small meshes used to receive their own bright specular light even at 0%.
-      // Keep the opaque cutout truly black; only the display carries studio reflections.
+      // These original meshes close the island and camera openings in the bezel.
+      // Keep their depth-tested opaque coverage, without reflective glass or textures.
       material = new THREE.MeshBasicMaterial({
-        color: kind === "2112" ? "#030405" : "#081014",
+        color: kind === "Lens2" ? "#080b10" : "#030405",
+        side: THREE.DoubleSide,
         toneMapped: false,
       });
     } else {
-      const m = source.clone();
+      // Standard materials have an unadjustable dielectric highlight. Promote them
+      // to Physical so the reflection control also governs direct-light specular.
+      const m =
+        source instanceof THREE.MeshPhysicalMaterial
+          ? source.clone()
+          : new THREE.MeshPhysicalMaterial();
+      if (!(source instanceof THREE.MeshPhysicalMaterial)) {
+        THREE.MeshStandardMaterial.prototype.copy.call(m, source);
+        m.defines = { STANDARD: "", PHYSICAL: "" };
+      }
       // Keep only textures actually used on non-screen geometry. Clone ownership is
       // explicit so loading/unmounting does not leak GPU resources.
       for (const key of [
@@ -121,23 +131,18 @@ export async function loadPhoneModel(
         m.color.set("#0a0c0d");
         m.metalness = 0;
         m.roughness = 0.55;
-      } else if (kind === "2112") {
-        m.color.set("#030405");
-        m.metalness = 0;
-        m.roughness = 0.7;
-      } else if (kind === "Lens" || kind === "Lens2") {
-        m.color.set(kind === "Lens" ? "#102634" : "#0c1720");
+      } else if (kind === "Lens") {
+        m.color.set("#102634");
         m.metalness = 0.18;
         m.roughness = 0.16;
       }
-      m.envMapIntensity =
-        kind === "2112" ? 0.04 : kind === "Black2" ? 0.25 : 0.8;
+      m.envMapIntensity = kind === "Black2" ? 0.25 : 0.8;
       finishes.push({ material: m, kind });
       material = m;
     }
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = source.name;
-    if (kind === "2112" || kind === "Lens2") island.push(mesh);
+
     group.add(mesh);
   });
   originalGeometries.forEach((g) => g.dispose());
@@ -148,21 +153,24 @@ export async function loadPhoneModel(
     group,
     update(settings) {
       const photo = settings.style === "photo";
+      const strength = photo ? settings.bodyReflection / 100 : 0;
       finishes.forEach(({ material, kind }) => {
         if (["color", "color2", "color3"].includes(kind)) {
           material.color.set(settings.frame);
           if (kind === "color2") material.color.multiplyScalar(0.88);
-          material.metalness = photo && kind !== "color2" ? 0.75 : 0.05;
-          material.roughness = photo ? (kind === "color2" ? 0.5 : 0.32) : 0.8;
+          material.metalness =
+            photo && kind !== "color2" ? 0.15 + 0.6 * strength : 0.05;
+          material.roughness = photo
+            ? kind === "color2"
+              ? 0.58
+              : 0.65 - 0.3 * strength
+            : 0.8;
         }
-        material.envMapIntensity = photo
-          ? kind === "Black2"
-            ? 0.25
-            : 0.8
-          : 0.25;
-      });
-      island.forEach((mesh) => {
-        mesh.visible = settings.island;
+        material.envMapIntensity = strength * (kind === "Black2" ? 0.12 : 0.8);
+        if (material instanceof THREE.MeshPhysicalMaterial) {
+          material.specularIntensity = strength * 0.5;
+          material.clearcoat = 0;
+        }
       });
     },
   };

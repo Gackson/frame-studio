@@ -1,3 +1,4 @@
+import { workspaceTheme, imageTheme } from "./theme";
 import { devices, type DeviceId } from "./devices";
 import { useRef, useState } from "react";
 import {
@@ -27,6 +28,7 @@ import type { Settings } from "./types";
 import { loadImage } from "./scene";
 export default function App() {
   const [moveMode, setMoveMode] = useState(false);
+  const [imageColor, setImageColor] = useState("#c5cbbd");
   const [s, setS] = useState<Settings>(initial),
     [screenshot, setScreenshot] = useState(""),
     [fileName, setFileName] = useState("探索山野 · 示例截图"),
@@ -71,6 +73,7 @@ export default function App() {
         setImageInfo(`${img.width} × ${img.height}`);
       } else {
         if (s.bgImage) URL.revokeObjectURL(s.bgImage);
+        setImageColor(imageTheme(img));
         setS((v) => ({ ...v, bgImage: url, bgType: "image" }));
       }
       notify(target === "screen" ? "屏幕截图已更新" : "背景图片已更新");
@@ -94,7 +97,16 @@ export default function App() {
   const exportW = Math.round(1600 * quality * Math.min(1, dims[0] / dims[1])),
     exportH = Math.round((exportW * dims[1]) / dims[0]);
   return (
-    <div className="app">
+    <div
+      className="app"
+      style={workspaceTheme(
+        s.bgType === "image" && s.bgImage
+          ? imageColor
+          : s.bgType === "gradient"
+            ? s.color2
+            : s.color1,
+      )}
+    >
       <header className="app-header">
         <a href="/" className="brand" aria-label="Frame Studio 首页">
           <span className="brand-symbol">
@@ -110,6 +122,14 @@ export default function App() {
           未命名作品<span className="local-label">本地创作</span>
         </div>
         <div className="header-actions">
+          <label className="export-background">
+            <input
+              type="checkbox"
+              checked={s.transparentExport}
+              onChange={(e) => update("transparentExport", e.target.checked)}
+            />
+            透明背景
+          </label>
           <span className="private-note">
             <span />
             图片仅在本地处理
@@ -519,11 +539,28 @@ export default function App() {
               onChange={(v) => update("reflection", v)}
               disabled={s.style === "minimal"}
             />
-            <Toggle
-              label="显示灵动岛"
-              value={s.island}
-              onChange={() => update("island", !s.island)}
+            <Slider
+              label="机身反光"
+              value={s.bodyReflection}
+              min={0}
+              max={100}
+              unit="%"
+              onChange={(v) => update("bodyReflection", v)}
+              disabled={s.style === "minimal"}
             />
+            <p className="device-note">
+              调至 0% 可抑制机身高光；屏幕反光单独调节。
+            </p>
+          </Section>
+          <Section title="导出设置">
+            <Toggle
+              label="透明背景（仅样机）"
+              value={s.transparentExport}
+              onChange={() => update("transparentExport", !s.transparentExport)}
+            />
+            <p className="device-note">
+              透明导出不包含背景和悬浮阴影，画布预览保持不变。
+            </p>
           </Section>
           <div className="inspector-footer">
             <Monitor size={13} />

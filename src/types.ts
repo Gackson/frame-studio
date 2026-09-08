@@ -19,7 +19,8 @@ export interface Settings {
   frame: string;
   shadow: number;
   reflection: number;
-  island: boolean;
+  bodyReflection: number;
+  transparentExport: boolean;
   fit: "cover" | "contain";
   ratio: string;
 }
@@ -40,8 +41,9 @@ export const initial: Settings = {
   bgImage: "",
   frame: "#e7e8e4",
   shadow: 35,
-  reflection: 45,
-  island: true,
+  reflection: 20,
+  bodyReflection: 35,
+  transparentExport: false,
   fit: "cover",
   ratio: "4:3",
 };

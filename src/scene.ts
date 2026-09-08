@@ -129,7 +129,7 @@ export class PhoneScene {
       alpha: true,
       preserveDrawingBuffer: true,
     });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(Math.max(devicePixelRatio, 1.5), 3));
     this.renderer.setClearColor(0, 0);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -139,7 +139,7 @@ export class PhoneScene {
     this.light = new THREE.DirectionalLight("#fffaf3", 1.6);
     this.light.position.set(-5, 7, 8);
     this.scene.add(this.light);
-    const rim = new THREE.DirectionalLight("#d8e7ff", 0.6);
+    const rim = new THREE.DirectionalLight("#d8e7ff", 0.2);
     rim.position.set(5, 1, -3);
     this.scene.add(rim, this.phone);
     this.screenCanvas.width = devices[settings.device].screen[0];
@@ -164,11 +164,35 @@ export class PhoneScene {
   }
   setImage(im: HTMLImageElement | HTMLCanvasElement) {
     this.image = im;
+    const native = devices[this.settings.device].screen;
+    const resolution = Math.min(
+      this.renderer.capabilities.maxTextureSize,
+      8192,
+      Math.max(native[1], im.height, (im.width * native[1]) / native[0]),
+    );
+    const width = Math.round((resolution * native[0]) / native[1]),
+      height = Math.round(resolution);
+    if (
+      width !== this.screenCanvas.width ||
+      height !== this.screenCanvas.height
+    ) {
+      this.screenTexture.dispose();
+      this.screenCanvas.width = width;
+      this.screenCanvas.height = height;
+      this.screenTexture = new THREE.CanvasTexture(this.screenCanvas);
+      this.screenTexture.colorSpace = THREE.SRGBColorSpace;
+      this.screenTexture.anisotropy =
+        this.renderer.capabilities.getMaxAnisotropy();
+      this.screenMat.emissiveMap = this.screenTexture;
+      this.screenMat.needsUpdate = true;
+    }
     this.updateTexture();
   }
   updateTexture() {
     if (!this.image) return;
     const ctx = this.screenCanvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.fillStyle = "#151816";
     ctx.fillRect(0, 0, this.screenCanvas.width, this.screenCanvas.height);
     cover(
@@ -195,7 +219,7 @@ export class PhoneScene {
     const photo = s.style === "photo";
     this.model?.update(s);
     this.scene.environmentIntensity = photo ? 1 : 0.4;
-    this.light.intensity = photo ? 1.6 : 1;
+    this.light.intensity = photo ? 0.5 + s.bodyReflection / 100 : 0.7;
     this.screenMat.envMapIntensity = photo ? (s.reflection / 100) * 3 : 0;
     this.screenMat.specularIntensity = photo ? s.reflection / 100 : 0;
     if (fitChanged) this.updateTexture();

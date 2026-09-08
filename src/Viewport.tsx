@@ -34,6 +34,20 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
     background = useRef<HTMLImageElement | null>(null),
     latest = useRef(settings);
   latest.current = settings;
+  const zoom = useRef(onZoom);
+  zoom.current = onZoom;
+  useEffect(() => {
+    const element = host.current!;
+    // React's delegated wheel listener is passive. A native non-passive listener
+    // must cancel browser scrolling/trackpad pinch zoom before changing the model.
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.deltaY !== 0) zoom.current(event.deltaY > 0 ? -2 : 2);
+    };
+    element.addEventListener("wheel", wheel, { passive: false });
+    return () => element.removeEventListener("wheel", wheel);
+  }, []);
   const [ready, setReady] = useState(false),
     [error, setError] = useState(""),
     [drag, setDrag] = useState(false);
@@ -151,7 +165,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
         output.width = w;
         output.height = h;
         const ctx = output.getContext("2d")!;
-        paintBackground(ctx, w, h, latest.current, background.current);
+        if (!latest.current.transparentExport)
+          paintBackground(ctx, w, h, latest.current, background.current);
         const oldRatio = p.renderer.getPixelRatio();
         const size = p.renderer.getSize(new Vector2());
         try {
@@ -171,7 +186,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
             const url = URL.createObjectURL(blob),
               a = document.createElement("a");
             a.href = url;
-            a.download = `frame-studio-${latest.current.style}-${w}x${h}.png`;
+            a.download = `frame-studio-${latest.current.device}-${latest.current.transparentExport ? "transparent-" : ""}${latest.current.style}-${w}x${h}.png`;
             a.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
             resolve();
@@ -196,7 +211,6 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
         setDrag(false);
         if (e.dataTransfer.files[0]) onDrop(e.dataTransfer.files[0]);
       }}
-      onWheel={(e) => onZoom(e.deltaY > 0 ? -2 : 2)}
     >
       <canvas ref={bg} className="background-canvas" aria-hidden="true" />
       <canvas
