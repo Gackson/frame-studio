@@ -1,6 +1,6 @@
 # Frame Studio
 
-浏览器里的 iPhone 17 样机工作台。React + TypeScript + Vite + Three.js，无后端。
+浏览器里的 iPhone 17 Pro Max 样机工作台。React + TypeScript + Vite + Three.js，无后端。
 
 ## 启动
 
@@ -23,12 +23,18 @@ npm run dev -- --host 127.0.0.1 --port 5188
 
 ## 模型与素材
 
-这是按 iPhone 17 外形比例程序化构建的轻量展示模型，包含圆角机身、侧键、双摄与灵动岛，并非 Apple 官方 CAD，也不是离线路径追踪级渲染。尺寸参考 Apple 官方规格：71.5 × 149.6 × 7.95 mm。
+现在使用 **Taufiq K 的 iPhone 17 Pro Max 现成 GLB 模型**（CC BY 4.0），约 3 万三角面、2.1 MB。保留原始镜组、侧键、接口、接缝和机身网格；不再使用原先的程序化简化模型。
 
-- Apple 规格：https://www.apple.com/iphone-17/specs/
+模型采用 Origami 公开署名的 glTF 转换版本。本项目更换屏幕 UV 和显示材质，校准金属、玻璃与镜头，统一模型坐标。完整来源和许可说明在 `public/models/ATTRIBUTION.md`，界面底部也有署名入口。
+
+屏幕采用发光 OLED 内容加 MeshPhysicalMaterial 的介电反射，反光来自 PMREM 摄影棚环境，随观察角度变化。黑色边框为非金属低反射材质，不再叠加原来的固定渐变玻璃层。简约模式关闭屏幕反射。
+
+- 原作者及模型：https://sketchfab.com/3d-models/iphone-17-pro-max-e7c5674931ae4b0ea1b4eaaabb159fdb
+- 许可：https://creativecommons.org/licenses/by/4.0/
+- GLB 分发来源：https://origami.ltd/models/product/iphone-17-pro-max.glb
 - Three.js（MIT）：https://threejs.org/ 。复用 RoomEnvironment / PMREM 和原生几何、材质、相机。
 - Lucide（ISC）：https://lucide.dev/
-- 示例摄影：Unsplash https://unsplash.com/photos/aerial-photography-of-lake-surrounded-by-trees-and-mountains-4ulffa5pD08 （图片资源 photo-1470770841072-f978cf4d019e）。仅用于内置示例。
+- 示例摄影：Unsplash https://images.unsplash.com/photo-1470770841072-f978cf4d019e （图片资源 photo-1470770841072-f978cf4d019e）。仅用于内置示例。
 - 示例屏幕由 Canvas 绘制，为虚构旅行应用。
 
 当前编辑状态仅保留在本次页面会话中，刷新会重置。上传图片最大 25 MB、6400 万像素。需要支持 WebGL 2 的现代浏览器。

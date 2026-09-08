@@ -1,0 +1,36 @@
+export const devices = {
+  "17-pro-max": {
+    name: "iPhone 17 Pro Max",
+    inches: "6.9",
+    file: "/models/iphone-17-pro-max.glb",
+    screen: [1320, 2868],
+    height: 6.9,
+    widthScale: 1,
+    depthScale: 1,
+    note: "精细原始模型",
+    author: "Taufiq K",
+  },
+  "17-pro": {
+    name: "iPhone 17 Pro",
+    inches: "6.3",
+    file: "/models/iphone-17-pro-max.glb",
+    screen: [1206, 2622],
+    height: (6.9 * 150) / 163.4,
+    widthScale: 71.9 / 78 / (150 / 163.4),
+    depthScale: 163.4 / 150,
+    note: "基于 Pro Max 网格的尺寸适配版",
+    author: "Taufiq K",
+  },
+  "15-pro-max": {
+    name: "iPhone 15 Pro Max",
+    inches: "6.7",
+    file: "/models/iphone-15-pro-max.glb",
+    screen: [1290, 2796],
+    height: (6.9 * 159.9) / 163.4,
+    widthScale: 1,
+    depthScale: 1,
+    note: "独立精细模型",
+    author: "polyman Studio",
+  },
+} as const;
+export type DeviceId = keyof typeof devices;
