@@ -1,6 +1,37 @@
 import { useId } from "react";
-import { ChevronDown, RotateCcw } from "lucide-react";
+import { ChevronDown, RotateCcw, Check, Plus } from "lucide-react";
 import type { ReactNode } from "react";
+export function CustomColorSlot({
+  label,
+  color,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  color: string | null;
+  selected: boolean;
+  onSelect(): void;
+}) {
+  return (
+    <button
+      className={`custom-color-slot ${selected ? "chosen" : ""}`}
+      aria-label={label}
+      aria-pressed={selected}
+      title={color ? label : "使用取色器设置自定义颜色后，将保留在这里"}
+      disabled={!color}
+      style={{ background: color ?? "var(--soft)" }}
+      onClick={onSelect}
+    >
+      {!color ? (
+        <Plus size={12} />
+      ) : selected ? (
+        <Check size={12} />
+      ) : (
+        <span>自</span>
+      )}
+    </button>
+  );
+}
 export function Section({
   title,
   children,
@@ -33,6 +64,7 @@ export function Slider({
   max,
   unit = "°",
   disabled = false,
+  continuous = false,
 }: {
   label: string;
   value: number;
@@ -41,8 +73,11 @@ export function Slider({
   max: number;
   unit?: string;
   disabled?: boolean;
+  continuous?: boolean;
 }) {
   const id = useId();
+  // Keep the track fixed while numeric input and model dragging retain full turns.
+  const rangeValue = Math.max(min, Math.min(max, value));
   return (
     <div className={`slider-field ${disabled ? "disabled" : ""}`}>
       <div className="field-row">
@@ -51,13 +86,14 @@ export function Slider({
           <input
             aria-label={`${label}数值`}
             type="number"
-            min={min}
-            max={max}
-            value={value}
+            min={continuous ? undefined : min}
+            max={continuous ? undefined : max}
+            value={Math.round(value * 100) / 100}
             disabled={disabled}
             onChange={(e) => {
               const v = Number(e.target.value);
-              if (Number.isFinite(v)) onChange(Math.max(min, Math.min(max, v)));
+              if (Number.isFinite(v))
+                onChange(continuous ? v : Math.max(min, Math.min(max, v)));
             }}
           />
           <span>{unit}</span>
@@ -68,12 +104,12 @@ export function Slider({
         type="range"
         min={min}
         max={max}
-        value={value}
+        value={Math.round(rangeValue * 100) / 100}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
         style={
           {
-            "--fill": `${((value - min) / (max - min)) * 100}%`,
+            "--fill": `${((rangeValue - min) / (max - min)) * 100}%`,
           } as React.CSSProperties
         }
       />
@@ -103,11 +139,17 @@ export function Toggle({
     </button>
   );
 }
-export function ResetButton({ onClick }: { onClick: () => void }) {
+export function ResetButton({
+  onClick,
+  label = "重置角度",
+}: {
+  onClick: () => void;
+  label?: string;
+}) {
   return (
     <button
-      title="重置角度"
-      aria-label="重置角度"
+      title={label}
+      aria-label={label}
       className="icon-button tiny"
       onClick={(e) => {
         e.preventDefault();

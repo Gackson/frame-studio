@@ -1,4 +1,15 @@
 export const devices = {
+  "iphone-air": {
+    name: "iPhone Air",
+    inches: "6.5",
+    file: "/models/iphone-air/iPhone_Air.obj",
+    screen: [1260, 2736],
+    height: 6.6,
+    widthScale: 1,
+    depthScale: 1,
+    note: "独立超薄模型 · rtql8d",
+    author: "rtql8d",
+  },
   "17-pro-max": {
     name: "iPhone 17 Pro Max",
     inches: "6.9",

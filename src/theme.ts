@@ -18,12 +18,12 @@ export function workspaceTheme(hex: string): CSSProperties {
   return {
     "--accent": `oklch(39% ${chroma} ${h})`,
     "--soft": `oklch(94% ${chroma * 0.4} ${h})`,
-    "--surface": `oklch(99% .004 ${h})`,
-    "--line": `oklch(90% .011 ${h})`,
-    "--muted": `oklch(51% .02 ${h})`,
-    "--subtle": `oklch(59% .015 ${h})`,
-    "--workspace": `oklch(96% .009 ${h})`,
-    "--ink": `oklch(28% .017 ${h})`,
+    "--surface": `oklch(99% ${Math.min(0.004, chroma)} ${h})`,
+    "--line": `oklch(90% ${Math.min(0.011, chroma)} ${h})`,
+    "--muted": `oklch(51% ${Math.min(0.02, chroma)} ${h})`,
+    "--subtle": `oklch(59% ${Math.min(0.015, chroma)} ${h})`,
+    "--workspace": `oklch(96% ${Math.min(0.009, chroma)} ${h})`,
+    "--ink": `oklch(28% ${Math.min(0.017, chroma)} ${h})`,
   } as CSSProperties;
 }
 export function imageTheme(image: HTMLImageElement): string {

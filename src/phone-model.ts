@@ -1,6 +1,13 @@
+import { loadAirModel } from "./air-model";
+import {
+  updateMetal,
+  updateInlay,
+  updateDetailMaterial,
+  updateLogo,
+} from "./metal";
 import { devices, type DeviceId } from "./devices";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
-import { bakeGeometry } from "./model-geometry";
+import { bakeGeometry, separateCameraPlate } from "./model-geometry";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
@@ -21,6 +28,7 @@ export async function loadPhoneModel(
   display: THREE.MeshPhysicalMaterial,
   device: DeviceId = "17-pro-max",
 ): Promise<PhoneModel> {
+  if (device === "iphone-air") return loadAirModel(display);
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const config = devices[device];
   const draco = new DRACOLoader().setDecoderPath("/draco/");
@@ -65,9 +73,13 @@ export async function loadPhoneModel(
       sxNzrmuTqVeaXdg: "Lens2",
       zFdeDaGNRwzccye: "Black2",
       dxCVrUCvYhjVxqy: "color",
+      eShKpuMNVJTRrgg: "color", // Outer titanium frame, originally black in its base-color map.
+      PpwUTnTFZJXxCoE: "color", // Camera rings share that same baked black map.
       oZRkkORNzkufnGD: "color2",
       yhcAXNGcJWCqtIS: "color2",
-      PaletteMaterial002: "color3",
+      PaletteMaterial002: "inlay", // Antenna separators use their own palette material.
+      xdyiJLYTYRfJffH: "inlay", // Solid side insert.
+      jpGaQNgTtEGkTfo: "inlayCover", // Transparent surface over that insert.
     };
     const kind =
       device === "15-pro-max"
@@ -80,7 +92,7 @@ export async function loadPhoneModel(
       geometry.dispose();
       return;
     }
-    let material: THREE.Material;
+    let material: THREE.Material | THREE.Material[];
     if (kind === "Screen") {
       screenFound = true;
       geometry.computeBoundingBox();
@@ -114,6 +126,16 @@ export async function loadPhoneModel(
       }
       // Keep only textures actually used on non-screen geometry. Clone ownership is
       // explicit so loading/unmounting does not leak GPU resources.
+      const calibratedSurface =
+        device === "15-pro-max" &&
+        [
+          "eShKpuMNVJTRrgg",
+          "PpwUTnTFZJXxCoE",
+          "dxCVrUCvYhjVxqy",
+          "PaletteMaterial002",
+          "xdyiJLYTYRfJffH",
+          "jpGaQNgTtEGkTfo",
+        ].includes(source.name);
       for (const key of [
         "map",
         "roughnessMap",
@@ -122,7 +144,8 @@ export async function loadPhoneModel(
         "alphaMap",
         "aoMap",
       ] as const) {
-        if (m[key]) m[key] = m[key]!.clone();
+        if (calibratedSurface) m[key] = null;
+        else if (m[key]) m[key] = m[key]!.clone();
       }
       if (["color", "color2", "color3"].includes(kind)) {
         m.metalness = kind === "color2" ? 0.05 : 0.75;
@@ -139,6 +162,21 @@ export async function loadPhoneModel(
       m.envMapIntensity = kind === "Black2" ? 0.25 : 0.8;
       finishes.push({ material: m, kind });
       material = m;
+      if (
+        device === "15-pro-max" &&
+        source.name === "PaletteMaterial003" &&
+        separateCameraPlate(geometry, true)
+      ) {
+        const plate = new THREE.MeshPhysicalMaterial({
+          name: "15ProMax_CameraPlate",
+          roughness: 0.38,
+          metalness: 0,
+        });
+        finishes.push({ material: plate, kind: "color2" });
+        const logo = new THREE.MeshPhysicalMaterial({ name: "15ProMax_Logo" });
+        finishes.push({ material: logo, kind: "Logo" });
+        material = [m, plate, logo];
+      }
     }
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = source.name;
@@ -152,24 +190,27 @@ export async function loadPhoneModel(
   return {
     group,
     update(settings) {
-      const photo = settings.style === "photo";
-      const strength = photo ? settings.bodyReflection / 100 : 0;
       finishes.forEach(({ material, kind }) => {
         if (["color", "color2", "color3"].includes(kind)) {
-          material.color.set(settings.frame);
-          if (kind === "color2") material.color.multiplyScalar(0.88);
-          material.metalness =
-            photo && kind !== "color2" ? 0.15 + 0.6 * strength : 0.05;
-          material.roughness = photo
-            ? kind === "color2"
-              ? 0.58
-              : 0.65 - 0.3 * strength
-            : 0.8;
-        }
-        material.envMapIntensity = strength * (kind === "Black2" ? 0.12 : 0.8);
-        if (material instanceof THREE.MeshPhysicalMaterial) {
-          material.specularIntensity = strength * 0.5;
-          material.clearcoat = 0;
+          updateMetal(
+            material as THREE.MeshPhysicalMaterial,
+            settings,
+            kind === "color2",
+          );
+        } else if (kind === "Logo") {
+          updateLogo(material as THREE.MeshPhysicalMaterial, settings);
+        } else if (kind === "inlay" || kind === "inlayCover") {
+          updateInlay(
+            material as THREE.MeshPhysicalMaterial,
+            settings,
+            kind === "inlayCover",
+          );
+        } else {
+          updateDetailMaterial(
+            material,
+            settings,
+            kind === "Black2" ? 0.12 : 0.8,
+          );
         }
       });
     },

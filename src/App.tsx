@@ -1,37 +1,77 @@
+import { Timeline } from "./Timeline";
+import {
+  capturePose,
+  curves,
+  sample,
+  nearestAngle,
+  type Keyframe,
+} from "./animation";
+import { loadVideo, releaseVideo } from "./media";
 import { workspaceTheme, imageTheme } from "./theme";
 import { devices, type DeviceId } from "./devices";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  ArrowUpRight,
   Check,
   ChevronDown,
   Download,
   ImagePlus,
-  Layers,
   Maximize,
   Minus,
-  Monitor,
-  MousePointer2,
+  Info,
   Plus,
   RotateCcw,
   Smartphone,
-  Sparkles,
   Upload,
   X,
   SlidersHorizontal,
 } from "lucide-react";
-import { Section, Slider, Toggle, ResetButton } from "./Controls";
+import {
+  Section,
+  Slider,
+  Toggle,
+  ResetButton,
+  CustomColorSlot,
+} from "./Controls";
 import { Viewport } from "./Viewport";
 import type { ViewportHandle } from "./Viewport";
-import { initial, palettes, poses } from "./types";
-import type { Settings } from "./types";
+import { initial, palettes, poses, frameColors } from "./types";
+import type { Settings, CustomColors } from "./types";
 import { loadImage } from "./scene";
+import {
+  loadProject,
+  saveProject,
+  saveAsset,
+  removeAsset,
+  type SavedProject,
+} from "./project-storage";
 export default function App() {
+  const [restored, setRestored] = useState(false);
+  const [customColors, setCustomColors] = useState<CustomColors>({
+    solid: null,
+    gradient: null,
+    frame: null,
+  });
+  const [assetIds, setAssetIds] = useState<SavedProject["assets"]>({
+    screen: null,
+    bg: null,
+  });
+  const saveFailed = useRef(false);
+  const [mediaType, setMediaType] = useState<"image" | "video">("image");
+  const [pasteTarget, setPasteTarget] = useState<"screen" | "bg">("screen");
+  const [time, setTime] = useState(0),
+    [duration, setDuration] = useState(5);
+  const [playing, setPlaying] = useState(false),
+    [loop, setLoop] = useState(true);
+  const [frames, setFrames] = useState<Keyframe[]>([]),
+    [selected, setSelected] = useState<string | null>(null);
+  const clock = useRef(0),
+    uploads = useRef({ screen: 0, bg: 0 });
+  const urls = useRef({ screen: "", bg: "" });
   const [moveMode, setMoveMode] = useState(false);
   const [imageColor, setImageColor] = useState("#c5cbbd");
   const [s, setS] = useState<Settings>(initial),
     [screenshot, setScreenshot] = useState(""),
-    [fileName, setFileName] = useState("探索山野 · 示例截图"),
+    [fileName, setFileName] = useState("示例截图"),
     [imageInfo, setImageInfo] = useState("1206 × 2622"),
     [toast, setToast] = useState(""),
     [exporting, setExporting] = useState(false),
@@ -42,51 +82,440 @@ export default function App() {
     bgInput = useRef<HTMLInputElement>(null),
     viewport = useRef<ViewportHandle>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const update = <K extends keyof Settings>(key: K, value: Settings[K]) =>
+  const update = <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    setPlaying(false);
     setS((v) => ({ ...v, [key]: value }));
+  };
+  function customizeColor(key: "color1" | "color2" | "frame", color: string) {
+    update(key, color);
+    setCustomColors((saved) =>
+      key === "frame"
+        ? { ...saved, frame: color }
+        : s.bgType === "solid"
+          ? { ...saved, solid: color }
+          : {
+              ...saved,
+              gradient: {
+                color1: key === "color1" ? color : s.color1,
+                color2: key === "color2" ? color : s.color2,
+                angle: s.gradientAngle,
+              },
+            },
+    );
+  }
   const notify = (message: string) => {
     setToast(message);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 4000);
   };
-  async function upload(file: File, target: "screen" | "bg") {
-    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      notify("请选择 PNG、JPG 或 WebP 图片。");
-      return;
-    }
-    if (file.size > 25 * 1024 * 1024) {
-      notify("图片不能超过 25 MB。");
-      return;
-    }
-    const url = URL.createObjectURL(file);
+  useEffect(() => {
+    let cancelled = false;
+    void loadProject()
+      .then((saved) => {
+        if (cancelled) return;
+        if (saved) {
+          const { project, screen, bg } = saved;
+          const previous = project.settings;
+          setCustomColors(
+            project.customColors ?? {
+              solid: palettes.some(([color]) => color === previous.color1)
+                ? null
+                : previous.color1,
+              gradient: palettes.some(
+                ([a, b]) =>
+                  a === previous.color1 &&
+                  b === previous.color2 &&
+                  previous.gradientAngle === initial.gradientAngle,
+              )
+                ? null
+                : {
+                    color1: previous.color1,
+                    color2: previous.color2,
+                    angle: previous.gradientAngle,
+                  },
+              frame: frameColors.some(([color]) => color === previous.frame)
+                ? null
+                : previous.frame,
+            },
+          );
+          const screenUrl = screen ? URL.createObjectURL(screen) : "";
+          const bgUrl = bg ? URL.createObjectURL(bg) : "";
+          urls.current = { screen: screenUrl, bg: bgUrl };
+          setS({
+            ...initial,
+            ...project.settings,
+            material:
+              project.settings.material ??
+              (project.settings.style === "minimal" ? "clay" : "realistic"),
+            bgImage: bgUrl,
+          });
+          setAssetIds({
+            screen: screen ? project.assets.screen : null,
+            bg: bg ? project.assets.bg : null,
+          });
+          setScreenshot(screenUrl);
+          setMediaType(screen ? project.mediaType : "image");
+          setFileName(screen ? project.fileName : "示例截图");
+          setImageInfo(screen ? project.imageInfo : "1206 × 2622");
+          setImageColor(project.imageColor);
+          clock.current = Math.max(0, Math.min(project.duration, project.time));
+          setTime(clock.current);
+          setDuration(project.duration);
+          setLoop(project.loop);
+          setFrames(project.frames);
+          setSelected(project.selected);
+          setQuality(project.quality);
+          setSelectedPose(project.selectedPose);
+          setPasteTarget(project.pasteTarget);
+          setMoveMode(project.moveMode);
+          setSideOpen(project.sideOpen);
+          if ((project.assets.screen && !screen) || (project.assets.bg && !bg))
+            notify("部分本地素材已丢失，请重新导入。");
+        }
+        setRestored(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRestored(true);
+          notify("无法恢复上次内容，已打开默认画布。");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const snapshot: SavedProject = {
+    version: 1,
+    settings: s,
+    customColors,
+    assets: assetIds,
+    mediaType,
+    fileName,
+    imageInfo,
+    imageColor,
+    time,
+    duration,
+    loop,
+    frames,
+    selected,
+    quality,
+    selectedPose,
+    pasteTarget,
+    moveMode,
+    sideOpen,
+  };
+  const persistence = useRef({ restored, snapshot });
+  persistence.current = { restored, snapshot };
+  const persist = () => {
+    const current = persistence.current;
+    if (!current.restored) return;
     try {
-      const img = await loadImage(url);
-      if (img.width * img.height > 64_000_000) {
-        URL.revokeObjectURL(url);
-        notify("图片像素过大，请缩小到 6400 万像素以内。");
+      saveProject(current.snapshot);
+      saveFailed.current = false;
+    } catch {
+      if (!saveFailed.current)
+        notify("本地保存失败，请检查浏览器存储空间；本次修改可能无法保留。");
+      saveFailed.current = true;
+    }
+  };
+  useEffect(() => {
+    // Save edits immediately; checkpoint continuous playback without writing every frame.
+    if (!playing) persist();
+  }, [
+    restored,
+    customColors,
+    s,
+    assetIds,
+    mediaType,
+    fileName,
+    imageInfo,
+    imageColor,
+    time,
+    duration,
+    loop,
+    frames,
+    selected,
+    quality,
+    selectedPose,
+    pasteTarget,
+    moveMode,
+    sideOpen,
+    playing,
+  ]);
+  useEffect(() => {
+    const flush = () => persist();
+    const hidden = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    const timer = window.setInterval(flush, 250);
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", hidden);
+    };
+  }, []);
+  function seek(t: number) {
+    setPlaying(false);
+    clock.current = t;
+    setTime(t);
+    const pose = sample(frames, t);
+    if (pose) setS((v) => ({ ...v, ...pose }));
+  }
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0,
+      last = performance.now();
+    const tick = (now: number) => {
+      const elapsed = (now - last) / 1000;
+      if (elapsed < 1 / 30) {
+        raf = requestAnimationFrame(tick);
         return;
       }
-      if (target === "screen") {
-        if (screenshot) URL.revokeObjectURL(screenshot);
-        setScreenshot(url);
-        setFileName(file.name);
-        setImageInfo(`${img.width} × ${img.height}`);
+      last = now;
+      let t = clock.current + elapsed;
+      if (t >= duration) {
+        if (loop) t %= duration;
+        else {
+          t = duration;
+          setPlaying(false);
+        }
+      }
+      clock.current = t;
+      setTime(t);
+      const pose = sample(frames, t);
+      if (pose) setS((v) => ({ ...v, ...pose }));
+      if (t < duration || loop) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, duration, loop, frames]);
+  useEffect(
+    () => () => {
+      Object.values(urls.current).forEach(
+        (url) => url && URL.revokeObjectURL(url),
+      );
+      clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+  function changeFrame(id: string, patch: Partial<Keyframe>) {
+    setPlaying(false);
+    setFrames((old) => {
+      if (
+        patch.time !== undefined &&
+        old.some((k) => k.id !== id && Math.abs(k.time - patch.time!) < 0.025)
+      )
+        return old;
+      return old
+        .map((k) => (k.id === id ? { ...k, ...patch } : k))
+        .sort((a, b) => a.time - b.time);
+    });
+  }
+  function addFrame() {
+    setPlaying(false);
+    const frameTime = Math.min(duration, Math.round(time * 10) / 10);
+    clock.current = frameTime;
+    setTime(frameTime);
+    const existing = frames.find((k) => Math.abs(k.time - frameTime) < 0.025);
+    const key: Keyframe = {
+      id: existing?.id ?? crypto.randomUUID(),
+      time: existing?.time ?? frameTime,
+      pose: capturePose(s),
+      curve: structuredClone(existing?.curve ?? curves["平滑进出"]),
+    };
+    setFrames((v) =>
+      [...v.filter((k) => k.id !== key.id), key].sort(
+        (a, b) => a.time - b.time,
+      ),
+    );
+    setSelected(key.id);
+  }
+  async function upload(file: File, target: "screen" | "bg") {
+    if (!restored) return;
+    const video = file.type.startsWith("video/");
+    if (
+      (!video &&
+        !["image/png", "image/jpeg", "image/webp"].includes(file.type)) ||
+      (video && target === "bg")
+    ) {
+      notify(
+        target === "bg"
+          ? "背景请使用 PNG、JPG 或 WebP 图片。"
+          : "请选择 PNG、JPG、WebP 图片或 MP4、WebM 视频。",
+      );
+      return;
+    }
+    if (file.size > (video ? 250 : 25) * 1024 * 1024) {
+      notify(video ? "视频不能超过 250 MB。" : "图片不能超过 25 MB。");
+      return;
+    }
+    const request = ++uploads.current[target],
+      url = URL.createObjectURL(file);
+    try {
+      let info = "",
+        theme = "";
+      if (video) {
+        const v = await loadVideo(url);
+        info = `${v.videoWidth} × ${v.videoHeight} · ${v.duration.toFixed(1)} s`;
+        releaseVideo(v);
       } else {
-        if (s.bgImage) URL.revokeObjectURL(s.bgImage);
-        setImageColor(imageTheme(img));
+        const img = await loadImage(url);
+        if (img.width * img.height > 64_000_000)
+          throw new Error("图片像素过大，请缩小到 6400 万像素以内。");
+        info = `${img.width} × ${img.height}`;
+        if (target === "bg") theme = imageTheme(img);
+      }
+      if (request !== uploads.current[target]) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      let assetId: string | null = null;
+      try {
+        assetId = await saveAsset(file);
+      } catch {
+        // Import still works when browser storage is unavailable; report the limitation.
+      }
+      if (request !== uploads.current[target]) {
+        URL.revokeObjectURL(url);
+        if (assetId) void removeAsset(assetId).catch(() => {});
+        return;
+      }
+      setAssetIds((ids) => ({ ...ids, [target]: assetId }));
+      const previous = urls.current[target];
+      urls.current[target] = url;
+      if (target === "screen") {
+        setPlaying(false);
+        setMediaType(video ? "video" : "image");
+        setScreenshot(url);
+        setFileName(file.name || "剪贴板图片");
+        setImageInfo(info);
+      } else {
+        setImageColor(theme);
         setS((v) => ({ ...v, bgImage: url, bgType: "image" }));
       }
-      notify(target === "screen" ? "屏幕截图已更新" : "背景图片已更新");
+      if (previous) URL.revokeObjectURL(previous);
+      notify(
+        !assetId
+          ? "素材已导入，但本地保存失败；重新打开后需重新导入。"
+          : target === "screen"
+            ? video
+              ? "屏幕视频已导入，可通过时间轴播放"
+              : "屏幕截图已更新"
+            : "背景图片已更新",
+      );
     } catch (e) {
       URL.revokeObjectURL(url);
+      if (request === uploads.current[target]) notify((e as Error).message);
+    }
+  }
+  const pasteHandler = useRef({ upload, pasteTarget });
+  pasteHandler.current = { upload, pasteTarget };
+  useEffect(() => {
+    const handle = (e: ClipboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.closest('input, textarea, [contenteditable="true"]')) return;
+      const file = Array.from(e.clipboardData?.items ?? [])
+        .find(
+          (i) =>
+            i.kind === "file" &&
+            (i.type.startsWith("image/") || i.type.startsWith("video/")),
+        )
+        ?.getAsFile();
+      if (file) {
+        e.preventDefault();
+        void pasteHandler.current.upload(
+          file,
+          pasteHandler.current.pasteTarget,
+        );
+      }
+    };
+    window.addEventListener("paste", handle);
+    return () => window.removeEventListener("paste", handle);
+  }, []);
+  async function paste(target: "screen" | "bg") {
+    setPasteTarget(target);
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (type) {
+          const blob = await item.getType(type);
+          await upload(new File([blob], "剪贴板图片", { type }), target);
+          return;
+        }
+      }
+      notify("剪贴板中没有图片，请复制图片后使用 ⌘V / Ctrl+V。");
+    } catch {
+      notify(
+        `已选择${target === "screen" ? "屏幕" : "背景"}，请按 ⌘V / Ctrl+V 粘贴图片。`,
+      );
+    }
+  }
+  function togglePlayback() {
+    if (exporting || !restored) return;
+    if (!playing && clock.current >= duration) {
+      clock.current = 0;
+      setTime(0);
+      const pose = sample(frames, 0);
+      if (pose) setS((v) => ({ ...v, ...pose }));
+    }
+    setPlaying((v) => !v);
+  }
+  const transport = useRef({ togglePlayback, exporting });
+  transport.current = { togglePlayback, exporting };
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (
+        e.code !== "Space" ||
+        e.altKey ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.shiftKey ||
+        e.isComposing
+      )
+        return;
+      const target = e.target as HTMLElement;
+      // Preserve normal typing and native form controls. Buttons and the canvas
+      // use the transport shortcut, avoiding a second synthetic button click.
+      if (
+        target.closest(
+          'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="combobox"]',
+        )
+      )
+        return;
+      e.preventDefault();
+      if (!e.repeat && !transport.current.exporting)
+        transport.current.togglePlayback();
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, []);
+  async function exportVideo() {
+    setPlaying(false);
+    setExporting(true);
+    try {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      await viewport.current?.exportVideo(frames, duration);
+      notify("动画已导出（无音轨）。");
+    } catch (e) {
       notify((e as Error).message);
+    } finally {
+      setExporting(false);
     }
   }
   async function exportImage() {
+    setPlaying(false);
     setExporting(true);
     try {
       await viewport.current?.exportPNG(quality);
-      notify("PNG 已导出，可以分享你的作品了。");
+      notify("PNG 已导出");
     } catch (e) {
       notify((e as Error).message);
     } finally {
@@ -94,6 +523,15 @@ export default function App() {
     }
   }
   const dims = s.ratio.split(":").map(Number);
+  const activePose = poses.findIndex((p) =>
+    (
+      ["rx", "ry", "rz", "scale", "perspective", "offsetX", "offsetY"] as const
+    ).every((key) =>
+      ["rx", "ry", "rz"].includes(key)
+        ? Math.abs(nearestAngle(p[key], s[key]) - s[key]) < 0.001
+        : p[key] === s[key],
+    ),
+  );
   const exportW = Math.round(1600 * quality * Math.min(1, dims[0] / dims[1])),
     exportH = Math.round((exportW * dims[1]) / dims[0]);
   return (
@@ -109,18 +547,10 @@ export default function App() {
     >
       <header className="app-header">
         <a href="/" className="brand" aria-label="Frame Studio 首页">
-          <span className="brand-symbol">
-            <Layers size={22} />
-          </span>
           <span>
             frame<span className="brand-light">studio</span>
-            <span className="brand-dot">.</span>
           </span>
         </a>
-        <div className="project-name">
-          <span className="header-divider" />
-          未命名作品<span className="local-label">本地创作</span>
-        </div>
         <div className="header-actions">
           <label className="export-background">
             <input
@@ -130,10 +560,6 @@ export default function App() {
             />
             透明背景
           </label>
-          <span className="private-note">
-            <span />
-            图片仅在本地处理
-          </span>
           <select
             className="quality-select"
             aria-label="导出倍率"
@@ -147,20 +573,29 @@ export default function App() {
           <button
             className="export-button"
             onClick={exportImage}
-            disabled={exporting}
+            disabled={exporting || !restored}
           >
             <Download size={15} />
             {exporting ? "正在导出…" : "导出图片"}
-            <ArrowUpRight size={14} />
+          </button>
+          <button
+            className="video-export-button"
+            disabled={exporting || !restored}
+            onClick={exportVideo}
+          >
+            导出动画
           </button>
         </div>
       </header>
-      <div className="editor">
-        <aside className={`inspector ${sideOpen ? "" : "collapsed"}`}>
-          <div className="inspector-heading">
-            <span>制作你的下一张佳作</span>
-            <span className="small-dot" />
-          </div>
+      <div
+        className="editor"
+        inert={exporting || !restored}
+        aria-busy={!restored}
+      >
+        <aside
+          className={`inspector ${sideOpen ? "" : "collapsed"}`}
+          onPointerDownCapture={() => setPlaying(false)}
+        >
           <Section title="设备机型">
             <select
               className="device-select"
@@ -176,12 +611,24 @@ export default function App() {
                 </option>
               ))}
             </select>
-            <p className="device-note">{devices[s.device].note}</p>
           </Section>
-          <Section title="屏幕截图">
+          <Section title="屏幕内容">
+            <div className="paste-actions">
+              <button onClick={() => paste("screen")}>粘贴到屏幕</button>
+              <button
+                aria-pressed={pasteTarget === "screen"}
+                onClick={() => setPasteTarget("screen")}
+              >
+                ⌘V / Ctrl+V {pasteTarget === "screen" ? "✓" : ""}
+              </button>
+            </div>
             <button
               className="upload-zone"
-              onClick={() => screenInput.current?.click()}
+              title="点击或拖入；PNG/JPG/WebP ≤ 25 MB，MP4/WebM ≤ 250 MB"
+              onClick={() => {
+                setPasteTarget("screen");
+                screenInput.current?.click();
+              }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
@@ -192,14 +639,16 @@ export default function App() {
               <span className="upload-icon">
                 <ImagePlus size={21} />
               </span>
-              <strong>上传你的设计</strong>
-              <span>点击上传，或将截图拖到这里</span>
-              <small>PNG、JPG、WebP · 最大 25 MB</small>
+              <strong>导入图片 / 视频</strong>
             </button>
             <div className="asset-row">
               <div className="asset-thumbnail">
                 {screenshot ? (
-                  <img src={screenshot} alt="已上传截图缩略图" />
+                  mediaType === "video" ? (
+                    <video src={screenshot} muted playsInline />
+                  ) : (
+                    <img src={screenshot} alt="已上传截图缩略图" />
+                  )
                 ) : (
                   <img src="/alpine.jpg" alt="山野示例缩略图" />
                 )}
@@ -212,7 +661,10 @@ export default function App() {
                 className="icon-button"
                 title="替换截图"
                 aria-label="替换截图"
-                onClick={() => screenInput.current?.click()}
+                onClick={() => {
+                  setPasteTarget("screen");
+                  screenInput.current?.click();
+                }}
               >
                 <Upload size={14} />
               </button>
@@ -240,13 +692,7 @@ export default function App() {
                 aria-pressed={s.style === "photo"}
                 onClick={() => update("style", "photo")}
               >
-                <span className="style-preview photo">
-                  <i />
-                </span>
-                <span>
-                  <Sparkles size={13} />
-                  真实摄影感
-                </span>
+                <span>3D</span>
                 {s.style === "photo" && (
                   <Check className="style-check" size={12} />
                 )}
@@ -258,15 +704,16 @@ export default function App() {
                     : "style-choice"
                 }
                 aria-pressed={s.style === "minimal"}
-                onClick={() => update("style", "minimal")}
+                onClick={() => {
+                  setPlaying(false);
+                  setS((v) => ({
+                    ...v,
+                    style: "minimal",
+                    material: v.material === "glow" ? "glow" : "clay",
+                  }));
+                }}
               >
-                <span className="style-preview minimal">
-                  <i />
-                </span>
-                <span>
-                  <Layers size={13} />
-                  2.5D 简约
-                </span>
+                <span>2.5D</span>
                 {s.style === "minimal" && (
                   <Check className="style-check" size={12} />
                 )}
@@ -293,38 +740,42 @@ export default function App() {
               />
             }
           >
-            <div className="pose-grid">
-              {poses.map((p, i) => (
-                <button
-                  key={p.name}
-                  className={`pose-choice ${selectedPose === i ? "active" : ""}`}
-                  aria-label={p.name}
-                  title={p.name}
-                  aria-pressed={selectedPose === i}
-                  onClick={() => {
-                    setS((v) => ({
-                      ...v,
-                      rx: p.rx,
-                      ry: p.ry,
-                      rz: p.rz,
-                      offsetX: 0,
-                      offsetY: 0,
-                    }));
-                    setSelectedPose(i);
-                  }}
-                >
-                  <Smartphone
-                    size={23}
-                    style={{
-                      transform: `perspective(80px) rotateX(${p.rx}deg) rotateY(${p.ry}deg) rotateZ(${-p.rz}deg)`,
+            <div className="pose-picker">
+              <div className="pose-grid" role="group" aria-label="构图预设">
+                {poses.map((p, i) => (
+                  <button
+                    key={p.name}
+                    className={`pose-choice ${activePose === i ? "active" : ""}`}
+                    aria-label={p.name}
+                    title={p.name}
+                    aria-pressed={activePose === i}
+                    onClick={() => {
+                      setPlaying(false);
+                      const { name: _name, ...composition } = p;
+                      setS((v) => ({
+                        ...v,
+                        ...composition,
+                        rx: nearestAngle(p.rx, v.rx),
+                        ry: nearestAngle(p.ry, v.ry),
+                        rz: nearestAngle(p.rz, v.rz),
+                      }));
+                      setSelectedPose(i);
                     }}
-                  />
-                  <span>{p.name.slice(0, 2)}</span>
-                </button>
-              ))}
+                  >
+                    <Smartphone
+                      size={23}
+                      style={{
+                        transform: `perspective(80px) rotateX(${p.rx}deg) rotateY(${p.ry}deg) rotateZ(${-p.rz}deg) scale(${p.scale / 100})`,
+                      }}
+                    />
+                    <span>{p.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
             <Slider
               label="水平旋转"
+              continuous
               value={s.ry}
               min={-180}
               max={180}
@@ -335,6 +786,7 @@ export default function App() {
             />
             <Slider
               label="俯仰角度"
+              continuous
               value={s.rx}
               min={-180}
               max={180}
@@ -345,6 +797,7 @@ export default function App() {
             />
             <Slider
               label="画面倾斜"
+              continuous
               value={s.rz}
               min={-180}
               max={180}
@@ -370,7 +823,18 @@ export default function App() {
               onChange={(v) => update("scale", v)}
             />
           </Section>
-          <Section title="位置">
+          <Section
+            title="位置"
+            action={
+              <ResetButton
+                label="重置位置"
+                onClick={() => {
+                  setPlaying(false);
+                  setS((v) => ({ ...v, offsetX: 0, offsetY: 0 }));
+                }}
+              />
+            }
+          >
             <Slider
               label="水平位置"
               value={s.offsetX}
@@ -387,14 +851,17 @@ export default function App() {
               unit="%"
               onChange={(v) => update("offsetY", v)}
             />
-            <button
-              className="text-button"
-              onClick={() => setS((v) => ({ ...v, offsetX: 0, offsetY: 0 }))}
-            >
-              回到画布中心
-            </button>
           </Section>
           <Section title="背景">
+            <div className="paste-actions">
+              <button onClick={() => paste("bg")}>粘贴到背景</button>
+              <button
+                aria-pressed={pasteTarget === "bg"}
+                onClick={() => setPasteTarget("bg")}
+              >
+                ⌘V / Ctrl+V {pasteTarget === "bg" ? "✓" : ""}
+              </button>
+            </div>
             <div className="segmented">
               {(
                 [
@@ -407,7 +874,10 @@ export default function App() {
                   key={key}
                   className={s.bgType === key ? "active" : ""}
                   aria-pressed={s.bgType === key}
-                  onClick={() => update("bgType", key)}
+                  onClick={() => {
+                    setPasteTarget("bg");
+                    update("bgType", key);
+                  }}
                 >
                   {label}
                 </button>
@@ -417,7 +887,16 @@ export default function App() {
               <>
                 <button
                   className="background-upload"
-                  onClick={() => bgInput.current?.click()}
+                  onClick={() => {
+                    setPasteTarget("bg");
+                    bgInput.current?.click();
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.files[0])
+                      upload(e.dataTransfer.files[0], "bg");
+                  }}
                 >
                   {s.bgImage ? (
                     <img src={s.bgImage} alt="自定义背景" />
@@ -430,7 +909,10 @@ export default function App() {
                   <button
                     className="text-button"
                     onClick={() => {
+                      ++uploads.current.bg;
                       URL.revokeObjectURL(s.bgImage);
+                      urls.current.bg = "";
+                      setAssetIds((ids) => ({ ...ids, bg: null }));
                       setS((v) => ({ ...v, bgImage: "", bgType: "gradient" }));
                     }}
                   >
@@ -448,7 +930,12 @@ export default function App() {
                         ["青苔", "砂岩", "暮紫", "陶土", "雾蓝", "深林"][i]
                       }
                       aria-label={`${["青苔", "砂岩", "暮紫", "陶土", "雾蓝", "深林"][i]}配色`}
-                      className={s.color1 === a ? "chosen" : ""}
+                      className={
+                        s.color1 === a &&
+                        (s.bgType === "solid" || s.color2 === b)
+                          ? "chosen"
+                          : ""
+                      }
                       style={{
                         background:
                           s.bgType === "solid"
@@ -459,9 +946,48 @@ export default function App() {
                         setS((v) => ({ ...v, color1: a, color2: b }))
                       }
                     >
-                      {s.color1 === a && <Check size={14} />}
+                      {s.color1 === a &&
+                        (s.bgType === "solid" || s.color2 === b) && (
+                          <Check size={14} />
+                        )}
                     </button>
                   ))}
+                  <CustomColorSlot
+                    label={
+                      s.bgType === "solid"
+                        ? "使用自定义背景色"
+                        : "使用自定义渐变"
+                    }
+                    color={
+                      s.bgType === "solid"
+                        ? customColors.solid
+                        : customColors.gradient
+                          ? `linear-gradient(${customColors.gradient.angle}deg, ${customColors.gradient.color1}, ${customColors.gradient.color2})`
+                          : null
+                    }
+                    selected={
+                      s.bgType === "solid"
+                        ? s.color1 === customColors.solid
+                        : !!customColors.gradient &&
+                          s.color1 === customColors.gradient.color1 &&
+                          s.color2 === customColors.gradient.color2 &&
+                          s.gradientAngle === customColors.gradient.angle
+                    }
+                    onSelect={() => {
+                      setPlaying(false);
+                      if (s.bgType === "solid" && customColors.solid)
+                        update("color1", customColors.solid);
+                      else if (customColors.gradient) {
+                        const { color1, color2, angle } = customColors.gradient;
+                        setS((v) => ({
+                          ...v,
+                          color1,
+                          color2,
+                          gradientAngle: angle,
+                        }));
+                      }
+                    }}
+                  />
                 </div>
                 <div className="color-fields">
                   <label>
@@ -469,7 +995,7 @@ export default function App() {
                       type="color"
                       aria-label="背景颜色一"
                       value={s.color1}
-                      onChange={(e) => update("color1", e.target.value)}
+                      onChange={(e) => customizeColor("color1", e.target.value)}
                     />
                     <span>{s.color1.toUpperCase()}</span>
                   </label>
@@ -479,7 +1005,9 @@ export default function App() {
                         type="color"
                         aria-label="背景颜色二"
                         value={s.color2}
-                        onChange={(e) => update("color2", e.target.value)}
+                        onChange={(e) =>
+                          customizeColor("color2", e.target.value)
+                        }
                       />
                       <span>{s.color2.toUpperCase()}</span>
                     </label>
@@ -491,7 +1019,13 @@ export default function App() {
                     value={s.gradientAngle}
                     min={0}
                     max={360}
-                    onChange={(v) => update("gradientAngle", v)}
+                    onChange={(angle) => {
+                      update("gradientAngle", angle);
+                      setCustomColors((saved) => ({
+                        ...saved,
+                        gradient: { color1: s.color1, color2: s.color2, angle },
+                      }));
+                    }}
                   />
                 )}
               </>
@@ -499,15 +1033,39 @@ export default function App() {
           </Section>
           <Section title="材质与光影">
             <div className="inline-setting">
+              <span>表面材质</span>
+              <select
+                aria-label="表面材质"
+                value={s.material === "realistic" ? s.metalFinish : s.material}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setPlaying(false);
+                  setS((v) =>
+                    value === "clay" || value === "glow"
+                      ? { ...v, material: value }
+                      : {
+                          ...v,
+                          material: "realistic",
+                          metalFinish: value as Settings["metalFinish"],
+                          metalRoughness: value === "steel" ? 20 : 34,
+                        },
+                  );
+                }}
+              >
+                <option value="aluminum" disabled={s.style === "minimal"}>
+                  阳极氧化铝
+                </option>
+                <option value="steel" disabled={s.style === "minimal"}>
+                  抛光不锈钢
+                </option>
+                <option value="clay">Clay</option>
+                <option value="glow">Glow</option>
+              </select>
+            </div>
+            <div className="inline-setting">
               <span>机身颜色</span>
               <div className="frame-colors">
-                {[
-                  ["#c9cebc", "鼠尾草"],
-                  ["#dad6e6", "薰衣草"],
-                  ["#b7d2e6", "雾蓝"],
-                  ["#e7e8e4", "白色"],
-                  ["#454946", "黑色"],
-                ].map(([c, name]) => (
+                {frameColors.map(([c, name]) => (
                   <button
                     key={c}
                     title={name}
@@ -520,8 +1078,44 @@ export default function App() {
                     {s.frame === c && <Check size={11} />}
                   </button>
                 ))}
+                <CustomColorSlot
+                  label="使用自定义机身色"
+                  color={customColors.frame}
+                  selected={s.frame === customColors.frame}
+                  onSelect={() =>
+                    customColors.frame && update("frame", customColors.frame)
+                  }
+                />
               </div>
             </div>
+            <div className="inline-setting">
+              <label htmlFor="body-color">自定义机身色</label>
+              <input
+                id="body-color"
+                type="color"
+                aria-label="自定义机身色"
+                value={s.frame}
+                onChange={(e) => customizeColor("frame", e.target.value)}
+              />
+            </div>
+            <Slider
+              label="金属粗糙度"
+              value={s.metalRoughness}
+              min={10}
+              max={85}
+              unit="%"
+              onChange={(v) => update("metalRoughness", v)}
+              disabled={s.material !== "realistic"}
+            />
+            <Slider
+              label="环境对比度"
+              value={s.environmentContrast}
+              min={0}
+              max={100}
+              unit="%"
+              onChange={(v) => update("environmentContrast", v)}
+              disabled={s.material !== "realistic"}
+            />
             <Slider
               label="悬浮阴影"
               value={s.shadow}
@@ -531,13 +1125,21 @@ export default function App() {
               onChange={(v) => update("shadow", v)}
             />
             <Slider
+              label="阴影距离"
+              value={s.shadowDistance}
+              min={0}
+              max={100}
+              unit="%"
+              onChange={(v) => update("shadowDistance", v)}
+            />
+            <Slider
               label="玻璃反光"
               value={s.reflection}
               min={0}
               max={100}
               unit="%"
               onChange={(v) => update("reflection", v)}
-              disabled={s.style === "minimal"}
+              disabled={s.material !== "realistic"}
             />
             <Slider
               label="机身反光"
@@ -546,11 +1148,8 @@ export default function App() {
               max={100}
               unit="%"
               onChange={(v) => update("bodyReflection", v)}
-              disabled={s.style === "minimal"}
+              disabled={s.material !== "realistic"}
             />
-            <p className="device-note">
-              调至 0% 可抑制机身高光；屏幕反光单独调节。
-            </p>
           </Section>
           <Section title="导出设置">
             <Toggle
@@ -558,16 +1157,7 @@ export default function App() {
               value={s.transparentExport}
               onChange={() => update("transparentExport", !s.transparentExport)}
             />
-            <p className="device-note">
-              透明导出不包含背景和悬浮阴影，画布预览保持不变。
-            </p>
           </Section>
-          <div className="inspector-footer">
-            <Monitor size={13} />
-            <a href="/models/attribution.html" target="_blank" rel="noreferrer">
-              3D 模型：{devices[s.device].author} · CC BY 4.0 ↗
-            </a>
-          </div>
         </aside>
         <main className="workspace">
           <div className="workspace-toolbar">
@@ -582,12 +1172,30 @@ export default function App() {
               <span className="canvas-icon">
                 <Smartphone size={15} />
               </span>
-              <span>{devices[s.device].name}</span>
-              <span className="device-meta">
-                {devices[s.device].inches} 英寸
-              </span>
+              <select
+                className="preview-device-select"
+                aria-label="预览机型"
+                value={s.device}
+                onChange={(e) => update("device", e.target.value as DeviceId)}
+              >
+                {Object.entries(devices).map(([id, device]) => (
+                  <option key={id} value={id}>
+                    {device.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="toolbar-right">
+              <a
+                className="icon-button"
+                href="/models/attribution.html"
+                target="_blank"
+                rel="noreferrer"
+                title="模型来源与许可"
+                aria-label="模型来源与许可"
+              >
+                <Info size={15} />
+              </a>
               <label className="ratio-control">
                 <Maximize size={13} />
                 <select
@@ -608,7 +1216,16 @@ export default function App() {
                 title="重置所有设置"
                 aria-label="重置所有设置"
                 onClick={() => {
+                  setPlaying(false);
+                  setFrames([]);
+                  setSelected(null);
+                  clock.current = 0;
+                  setTime(0);
                   setS({ ...initial });
+                  ++uploads.current.bg;
+                  if (urls.current.bg) URL.revokeObjectURL(urls.current.bg);
+                  urls.current.bg = "";
+                  setAssetIds((ids) => ({ ...ids, bg: null }));
                   setSelectedPose(0);
                   notify("已恢复默认构图与样式");
                 }}
@@ -622,47 +1239,46 @@ export default function App() {
               className="artboard-wrap"
               style={{ "--ratio": dims[0] / dims[1] } as React.CSSProperties}
             >
-              <Viewport
-                key={s.device}
-                ref={viewport}
-                moveMode={moveMode}
-                onMove={(offsetX, offsetY) =>
-                  setS((v) => ({
-                    ...v,
-                    offsetX: Math.round(offsetX * 10) / 10,
-                    offsetY: Math.round(offsetY * 10) / 10,
-                  }))
-                }
-                settings={s}
-                screenshot={screenshot}
-                onRotate={(rx, ry) => {
-                  setS((v) => ({
-                    ...v,
-                    rx: Math.round(rx),
-                    ry: Math.round(ry),
-                  }));
-                  setSelectedPose(-1);
-                }}
-                onZoom={(delta) =>
-                  setS((v) => ({
-                    ...v,
-                    scale: Math.max(35, Math.min(150, v.scale + delta)),
-                  }))
-                }
-                onDrop={(file) => upload(file, "screen")}
-                onError={notify}
-              />
-            </div>
-            <div className="canvas-caption">
-              <span>你的设计，值得更好的呈现。</span>
-              <span>
-                {exportW} × {exportH} px
-              </span>
+              {restored && (
+                <Viewport
+                  key={s.device}
+                  ref={viewport}
+                  moveMode={moveMode}
+                  onMove={(offsetX, offsetY) =>
+                    setS((v) => ({
+                      ...v,
+                      offsetX: Math.round(offsetX * 10) / 10,
+                      offsetY: Math.round(offsetY * 10) / 10,
+                    }))
+                  }
+                  settings={s}
+                  screenshot={screenshot}
+                  mediaType={mediaType}
+                  time={time}
+                  playing={playing}
+                  onRotate={(rx, ry) => {
+                    setPlaying(false);
+                    setS((v) => ({
+                      ...v,
+                      rx: Math.round(rx),
+                      ry: Math.round(ry),
+                    }));
+                    setSelectedPose(-1);
+                  }}
+                  onZoom={(delta) =>
+                    setS((v) => ({
+                      ...v,
+                      scale: Math.max(35, Math.min(150, v.scale + delta)),
+                    }))
+                  }
+                  onDrop={(file) => upload(file, "screen")}
+                  onError={notify}
+                />
+              )}
             </div>
           </div>
           <div className="workspace-bottom">
             <div className="interaction-hint">
-              <MousePointer2 size={13} />
               <button
                 className={`canvas-tool ${!moveMode ? "active" : ""}`}
                 aria-pressed={!moveMode}
@@ -677,9 +1293,6 @@ export default function App() {
               >
                 移动
               </button>
-              <span className="shift-hint">Shift + 拖动移动</span>
-              <span className="dot-separator">·</span>
-              <span>滚轮缩放</span>
             </div>
             <div className="zoom-control">
               <button
@@ -704,25 +1317,46 @@ export default function App() {
                 <Plus size={14} />
               </button>
             </div>
-            <span className="render-status">
-              <span />
-              {s.style === "photo" ? "实时 3D 渲染" : "2.5D 正交渲染"}
+            <span className="export-dimensions">
+              {exportW} × {exportH} px
             </span>
           </div>
+          <Timeline
+            time={time}
+            duration={duration}
+            playing={playing}
+            loop={loop}
+            frames={frames}
+            selected={selected}
+            onSeek={seek}
+            onDuration={(d) => {
+              if (frames.some((k) => k.time > d)) {
+                notify("请先移动或删除超出新时长的关键帧。");
+                return;
+              }
+              setDuration(d);
+              seek(Math.min(time, d));
+            }}
+            onPlay={togglePlayback}
+            onLoop={() => setLoop((v) => !v)}
+            onAdd={addFrame}
+            onSelect={(k) => {
+              setSelected(k.id);
+              seek(k.time);
+            }}
+            onChange={changeFrame}
+            onDelete={() => {
+              setFrames((v) => v.filter((k) => k.id !== selected));
+              setSelected(null);
+            }}
+          />
         </main>
       </div>
-      <footer className="app-footer">
-        <span>为好设计，多一个好角度。</span>
-        <span>
-          <span className="status-dot" />
-          所有图片在本地处理，不上传服务器
-        </span>
-      </footer>
       <input
         ref={screenInput}
         className="visually-hidden"
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime"
         aria-label="上传屏幕截图"
         onChange={(e) => {
           if (e.target.files?.[0]) upload(e.target.files[0], "screen");
@@ -740,6 +1374,11 @@ export default function App() {
           e.target.value = "";
         }}
       />
+      {exporting && (
+        <div className="export-progress" role="status">
+          正在导出，请保持页面可见… 动画以 30 fps 实时录制，无音轨。
+        </div>
+      )}
       {toast && (
         <div className="toast" role="status">
           <Check size={16} />

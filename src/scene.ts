@@ -8,6 +8,7 @@ import {
   type PhoneModel,
 } from "./phone-model";
 import type { Settings } from "./types";
+import { materialMode } from "./metal";
 
 export function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -20,22 +21,22 @@ export function loadImage(url: string): Promise<HTMLImageElement> {
 }
 export function cover(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  img: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement,
   x: number,
   y: number,
   w: number,
   h: number,
   contain = false,
 ) {
-  const ratio = contain
-    ? Math.min(w / img.width, h / img.height)
-    : Math.max(w / img.width, h / img.height);
+  const iw = img instanceof HTMLVideoElement ? img.videoWidth : img.width;
+  const ih = img instanceof HTMLVideoElement ? img.videoHeight : img.height;
+  const ratio = contain ? Math.min(w / iw, h / ih) : Math.max(w / iw, h / ih);
   ctx.drawImage(
     img,
-    x + (w - img.width * ratio) / 2,
-    y + (h - img.height * ratio) / 2,
-    img.width * ratio,
-    img.height * ratio,
+    x + (w - iw * ratio) / 2,
+    y + (h - ih * ratio) / 2,
+    iw * ratio,
+    ih * ratio,
   );
 }
 export async function demoScreen() {
@@ -114,10 +115,23 @@ export class PhoneScene {
   screenTexture: THREE.CanvasTexture;
   screenMat: THREE.MeshPhysicalMaterial;
   settings: Settings;
-  image: HTMLImageElement | HTMLCanvasElement | null = null;
+  image: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | null = null;
   env: THREE.WebGLRenderTarget;
   disposed = false;
   light: THREE.DirectionalLight;
+  shadowsEnabled = true;
+  shadowLight = new THREE.DirectionalLight("#ffffff", 0);
+  shadowPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.ShadowMaterial({
+      color: "#181818",
+      opacity: 0.2,
+      depthWrite: false,
+    }),
+  );
+  private shadowBounds = new THREE.Box3();
+  private shadowCenter = new THREE.Vector3();
+  private shadowSize = new THREE.Vector3();
   model: PhoneModel | null = null;
   ready: Promise<void>;
 
@@ -131,9 +145,14 @@ export class PhoneScene {
     });
     this.renderer.setPixelRatio(Math.min(Math.max(devicePixelRatio, 1.5), 3));
     this.renderer.setClearColor(0, 0);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.VSMShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
-    this.env = createStudioEnvironment(this.renderer);
+    this.env = createStudioEnvironment(
+      this.renderer,
+      settings.environmentContrast,
+    );
     this.scene.environment = this.env.texture;
     this.scene.add(new THREE.HemisphereLight("#fff7ee", "#566558", 0.8));
     this.light = new THREE.DirectionalLight("#fffaf3", 1.6);
@@ -142,6 +161,34 @@ export class PhoneScene {
     const rim = new THREE.DirectionalLight("#d8e7ff", 0.2);
     rim.position.set(5, 1, -3);
     this.scene.add(rim, this.phone);
+    // A transparent receiver catches the actual model silhouette. Its shallow
+    // incline keeps the floor visible with both perspective and orthographic cameras.
+    this.shadowPlane.rotation.x = -Math.PI / 2 + Math.atan(0.28);
+    this.shadowPlane.receiveShadow = true;
+    // Fade the finite catcher before its edges, keeping a broad penumbra without
+    // exposing the VSM receiver/frustum boundary across the background.
+    this.shadowPlane.material.onBeforeCompile = (shader) => {
+      shader.vertexShader =
+        "varying vec2 vFloorUv;\n" +
+        shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\n vFloorUv = uv;",
+        );
+      shader.fragmentShader =
+        "varying vec2 vFloorUv;\n" +
+        shader.fragmentShader.replace(
+          "#include <tonemapping_fragment>",
+          "gl_FragColor.a *= 1.0 - smoothstep(0.2, 0.48, length(vFloorUv - vec2(0.5)));\n#include <tonemapping_fragment>",
+        );
+    };
+    this.shadowPlane.visible = false;
+    this.shadowLight.castShadow = true;
+    this.shadowLight.shadow.mapSize.set(512, 512);
+    this.shadowLight.shadow.radius = 32;
+    this.shadowLight.shadow.blurSamples = 24;
+    this.shadowLight.shadow.bias = -0.0001;
+    this.shadowLight.shadow.normalBias = 0.015;
+    this.scene.add(this.shadowPlane, this.shadowLight, this.shadowLight.target);
     this.screenCanvas.width = devices[settings.device].screen[0];
     this.screenCanvas.height = devices[settings.device].screen[1];
     this.screenTexture = new THREE.CanvasTexture(this.screenCanvas);
@@ -156,19 +203,24 @@ export class PhoneScene {
           return;
         }
         this.model = model;
+        model.group.traverse((object) => {
+          if (object instanceof THREE.Mesh) object.castShadow = true;
+        });
         this.phone.add(model.group);
         this.update(this.settings);
       },
     );
     this.update(settings);
   }
-  setImage(im: HTMLImageElement | HTMLCanvasElement) {
+  setImage(im: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement) {
     this.image = im;
     const native = devices[this.settings.device].screen;
     const resolution = Math.min(
       this.renderer.capabilities.maxTextureSize,
       8192,
-      Math.max(native[1], im.height, (im.width * native[1]) / native[0]),
+      im instanceof HTMLVideoElement
+        ? Math.min(1920, im.videoHeight)
+        : Math.max(native[1], im.height, (im.width * native[1]) / native[0]),
     );
     const width = Math.round((resolution * native[0]) / native[1]),
       height = Math.round(resolution);
@@ -197,7 +249,7 @@ export class PhoneScene {
     ctx.fillRect(0, 0, this.screenCanvas.width, this.screenCanvas.height);
     cover(
       ctx,
-      this.image as HTMLImageElement,
+      this.image,
       0,
       0,
       this.screenCanvas.width,
@@ -209,6 +261,12 @@ export class PhoneScene {
   }
   update(s: Settings) {
     const fitChanged = this.settings.fit !== s.fit;
+    if (this.settings.environmentContrast !== s.environmentContrast) {
+      const previous = this.env;
+      this.env = createStudioEnvironment(this.renderer, s.environmentContrast);
+      this.scene.environment = this.env.texture;
+      previous.dispose();
+    }
     this.settings = s;
     this.phone.rotation.set(
       THREE.MathUtils.degToRad(s.rx),
@@ -216,10 +274,10 @@ export class PhoneScene {
       THREE.MathUtils.degToRad(s.rz),
     );
     this.phone.scale.setScalar(s.scale / 100);
-    const photo = s.style === "photo";
+    const photo = materialMode(s) === "realistic";
     this.model?.update(s);
     this.scene.environmentIntensity = photo ? 1 : 0.4;
-    this.light.intensity = photo ? 0.5 + s.bodyReflection / 100 : 0.7;
+    this.light.intensity = photo ? 0.25 + s.bodyReflection / 200 : 0.7;
     this.screenMat.envMapIntensity = photo ? (s.reflection / 100) * 3 : 0;
     this.screenMat.specularIntensity = photo ? s.reflection / 100 : 0;
     if (fitChanged) this.updateTexture();
@@ -254,6 +312,37 @@ export class PhoneScene {
     this.ortho.far = 200;
     this.ortho.position.set(0, 0, 30);
     this.ortho.updateProjectionMatrix();
+    this.shadowPlane.visible =
+      this.shadowsEnabled && this.settings.shadow > 0 && !!this.model;
+    this.shadowLight.visible = this.shadowPlane.visible;
+    if (this.shadowPlane.visible) {
+      this.phone.updateMatrixWorld(true);
+      this.shadowBounds.setFromObject(this.phone);
+      this.shadowBounds.getCenter(this.shadowCenter);
+      this.shadowBounds.getSize(this.shadowSize);
+      const gap =
+        ((0.1 + this.settings.shadowDistance * 0.024) * this.settings.scale) / 100;
+      this.shadowPlane.position.set(
+        this.shadowCenter.x,
+        this.shadowBounds.min.y - gap,
+        this.shadowBounds.min.z,
+      );
+      this.shadowPlane.material.opacity = this.settings.shadow / 260;
+      this.shadowLight.position.set(
+        this.shadowCenter.x - 3,
+        this.shadowCenter.y + 10,
+        this.shadowCenter.z + 4,
+      );
+      this.shadowLight.target.position.copy(this.shadowCenter);
+      const extent = Math.max(4, this.shadowSize.length() * 0.85);
+      this.shadowPlane.scale.set(extent * 1.5, extent * 1.5, 1);
+      const camera = this.shadowLight.shadow.camera;
+      camera.left = camera.bottom = -extent;
+      camera.right = camera.top = extent;
+      camera.near = 0.1;
+      camera.far = 60;
+      camera.updateProjectionMatrix();
+    }
     this.renderer.render(
       this.scene,
       this.settings.style === "minimal" ? this.ortho : this.camera,
@@ -269,6 +358,9 @@ export class PhoneScene {
     this.screenTexture.dispose();
     this.screenMat.dispose();
     this.env.dispose();
+    this.shadowPlane.geometry.dispose();
+    this.shadowPlane.material.dispose();
+    this.shadowLight.shadow.dispose();
     this.renderer.dispose();
   }
 }
@@ -318,16 +410,5 @@ export function paintBackground(
   } else {
     ctx.fillStyle = s.color1;
     ctx.fillRect(0, 0, w, h);
-  }
-  if (s.shadow > 0) {
-    ctx.save();
-    ctx.translate(w * (0.52 + s.offsetX / 100), h * (0.84 + s.offsetY / 100));
-    ctx.scale(w * 0.23, h * 0.055);
-    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-    shadow.addColorStop(0, `rgba(18,30,20,${s.shadow / 180})`);
-    shadow.addColorStop(1, "rgba(18,30,20,0)");
-    ctx.fillStyle = shadow;
-    ctx.fillRect(-1, -1, 2, 2);
-    ctx.restore();
   }
 }

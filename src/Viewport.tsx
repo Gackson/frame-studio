@@ -1,3 +1,6 @@
+import { recordAnimation, seekVideo } from "./recording";
+import type { Keyframe } from "./animation";
+import { loadVideo, releaseVideo } from "./media";
 import { devices } from "./devices";
 import { Vector2 } from "three";
 import {
@@ -11,11 +14,15 @@ import type { Settings } from "./types";
 import { PhoneScene, demoScreen, loadImage, paintBackground } from "./scene";
 import { LoaderCircle, ImagePlus, AlertCircle } from "lucide-react";
 export interface ViewportHandle {
+  exportVideo: (frames: Keyframe[], duration: number) => Promise<void>;
   exportPNG: (multiplier: number) => Promise<void>;
 }
 interface Props {
   settings: Settings;
   screenshot: string;
+  mediaType: "image" | "video";
+  time: number;
+  playing: boolean;
   onMove: (x: number, y: number) => void;
   moveMode: boolean;
   onRotate: (x: number, y: number) => void;
@@ -24,9 +31,40 @@ interface Props {
   onError: (message: string) => void;
 }
 export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
-  { settings, screenshot, onRotate, onMove, moveMode, onZoom, onDrop, onError },
+  {
+    settings,
+    screenshot,
+    mediaType,
+    time,
+    playing,
+    onRotate,
+    onMove,
+    moveMode,
+    onZoom,
+    onDrop,
+    onError,
+  },
   ref,
 ) {
+  const video = useRef<HTMLVideoElement | null>(null);
+  const playback = useRef({ time, playing });
+  playback.current = { time, playing };
+  const errorHandler = useRef(onError);
+  errorHandler.current = onError;
+  function syncVideo(v: HTMLVideoElement) {
+    const { time: t, playing: play } = playback.current;
+    const target = Math.min(t, Math.max(0, v.duration - 0.001));
+    if (Math.abs(v.currentTime - target) > (play ? 0.18 : 0.015))
+      v.currentTime = target;
+    if (play && t < v.duration && v.paused)
+      void v
+        .play()
+        .catch(() => errorHandler.current("视频播放受限，请再次点击播放。"));
+    else if (!play || t >= v.duration) v.pause();
+  }
+  useEffect(() => {
+    if (video.current) syncVideo(video.current);
+  }, [time, playing]);
   const canvas = useRef<HTMLCanvasElement>(null),
     bg = useRef<HTMLCanvasElement>(null),
     host = useRef<HTMLDivElement>(null),
@@ -116,15 +154,49 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
   useEffect(() => {
     let canceled = false;
     if (!screenshot) return;
-    loadImage(screenshot)
-      .then((im) => {
-        if (!canceled) engine.current?.setImage(im);
-      })
-      .catch((e) => onError(e.message));
+    let owned: HTMLVideoElement | null = null,
+      frame = 0;
+    if (mediaType === "video") {
+      loadVideo(screenshot)
+        .then((v) => {
+          if (canceled) {
+            releaseVideo(v);
+            return;
+          }
+          owned = v;
+          video.current = v;
+          engine.current?.setImage(v);
+          syncVideo(v);
+          v.onseeked = () => engine.current?.updateTexture();
+          const draw = () => {
+            if (!canceled) {
+              if (!v.paused && !v.seeking) engine.current?.updateTexture();
+              frame = requestAnimationFrame(draw);
+            }
+          };
+          frame = requestAnimationFrame(draw);
+        })
+        .catch((e) => {
+          if (!canceled) errorHandler.current(e.message);
+        });
+    } else
+      loadImage(screenshot)
+        .then((im) => {
+          if (!canceled) engine.current?.setImage(im);
+        })
+        .catch((e) => {
+          if (!canceled) errorHandler.current(e.message);
+        });
     return () => {
       canceled = true;
+      cancelAnimationFrame(frame);
+      if (owned) {
+        owned.onseeked = null;
+        releaseVideo(owned);
+        if (video.current === owned) video.current = null;
+      }
     };
-  }, [screenshot]);
+  }, [screenshot, mediaType]);
   useEffect(() => {
     let canceled = false;
     if (!settings.bgImage) {
@@ -153,9 +225,24 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
   useImperativeHandle(
     ref,
     () => ({
+      async exportVideo(frames, duration) {
+        const p = engine.current;
+        if (!p || !ready) throw new Error("样机还在加载，请稍后再试。");
+        await recordAnimation(
+          p,
+          latest.current,
+          frames,
+          duration,
+          background.current,
+          video.current,
+        );
+      },
       async exportPNG(multiplier) {
         const p = engine.current;
         if (!p || !ready) throw new Error("样机还在加载，请稍后再试。");
+        const v = video.current;
+        if (v) await seekVideo(v, playback.current.time);
+        if (v) p.updateTexture();
         const [rw, rh] = latest.current.ratio.split(":").map(Number);
         const w = Math.round(1600 * multiplier * Math.min(1, rw / rh)),
           h = Math.round((w * rh) / rw);
@@ -168,12 +255,15 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
         if (!latest.current.transparentExport)
           paintBackground(ctx, w, h, latest.current, background.current);
         const oldRatio = p.renderer.getPixelRatio();
+        const oldShadows = p.shadowsEnabled;
         const size = p.renderer.getSize(new Vector2());
         try {
+          p.shadowsEnabled = !latest.current.transparentExport;
           p.renderer.setPixelRatio(1);
           p.resize(w, h);
           ctx.drawImage(p.renderer.domElement, 0, 0, w, h);
         } finally {
+          p.shadowsEnabled = oldShadows;
           p.renderer.setPixelRatio(oldRatio);
           p.resize(size.x, size.y);
         }
@@ -246,8 +336,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
             );
           } else if (p)
             onRotate(
-              Math.max(-180, Math.min(180, p.rx + (e.clientY - p.y) * 0.32)),
-              Math.max(-180, Math.min(180, p.ry + (e.clientX - p.x) * 0.32)),
+              p.rx + (e.clientY - p.y) * 0.32,
+              p.ry + (e.clientX - p.x) * 0.32,
             );
         }}
         onPointerUp={() => {
@@ -291,26 +381,10 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
               return;
             }
             onRotate(
-              Math.max(
-                -180,
-                Math.min(
-                  180,
-                  settings.rx +
-                    (e.key === "ArrowUp" ? -2 : e.key === "ArrowDown" ? 2 : 0),
-                ),
-              ),
-              Math.max(
-                -180,
-                Math.min(
-                  180,
-                  settings.ry +
-                    (e.key === "ArrowLeft"
-                      ? -2
-                      : e.key === "ArrowRight"
-                        ? 2
-                        : 0),
-                ),
-              ),
+              settings.rx +
+                (e.key === "ArrowUp" ? -2 : e.key === "ArrowDown" ? 2 : 0),
+              settings.ry +
+                (e.key === "ArrowLeft" ? -2 : e.key === "ArrowRight" ? 2 : 0),
             );
           }
         }}
@@ -318,7 +392,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
       {!ready && !error && (
         <div className="canvas-message">
           <LoaderCircle className="spin" size={20} />
-          正在布置摄影棚…
+          模型加载中…
         </div>
       )}
       {error && (
@@ -330,7 +404,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(
       {drag && (
         <div className="drop-overlay">
           <ImagePlus size={32} />
-          <span>松开，替换屏幕截图</span>
+          <span>松开，替换屏幕图片或视频</span>
         </div>
       )}
     </div>
