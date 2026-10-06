@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { publicAsset } from "./assets";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { bakeGeometry } from "./model-geometry";
 import { createInsetDisplayGeometry } from "./display-geometry";
@@ -8,9 +9,9 @@ export async function loadAirModel(
   display: THREE.MeshPhysicalMaterial,
 ): Promise<PhoneModel> {
   const [source, logoMask] = await Promise.all([
-    new OBJLoader().loadAsync("/models/iphone-air/iPhone_Air.obj"),
+    new OBJLoader().loadAsync(publicAsset("models/iphone-air/iPhone_Air.obj")),
     new THREE.TextureLoader().loadAsync(
-      "/models/iphone-air/back_metalness.jpeg",
+      publicAsset("models/iphone-air/back_metalness.jpeg"),
     ),
   ]);
   const logo = new THREE.MeshPhysicalMaterial({

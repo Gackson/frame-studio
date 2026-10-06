@@ -63,6 +63,12 @@ npm run dev -- --host 127.0.0.1 --port 5188
 
 验证：`npm run build`；动画插值单元测试：`npm test`（Node.js 22.18+ 或 24+，使用原生 TypeScript 类型擦除）。
 
+### 部署
+
+- EdgeOne Pages：构建命令 `npm run build`，产物目录 `dist`。关键帧和素材 ID 兼容普通 HTTP 页面；推荐使用 HTTPS，以获得完整的浏览器剪贴板等能力。
+- GitHub Pages：在仓库 Settings → Pages → Build and deployment 中，将 Source 设为 **GitHub Actions**。`.github/workflows/pages.yml` 会在推送到 `main` 时测试、构建并发布 `dist`，也可手动运行。不要直接发布仓库源码，浏览器无法执行入口 TSX。
+- 构建产物和模型、解码器、示例图均使用相对部署路径，同一份 `dist` 可部署到域名根目录或 `/frame-studio/` 子路径。
+
 ### 区间曲线与材质修正
 
 - 曲线编辑器现在明确显示「区间起点 → 终点」。点击两个关键帧之间的条带选择区间；曲线以起始帧的出段参数保存，计算 `起点 + (终点 - 起点) × 缓动进度`。最后一帧没有后续区间，不提供出段曲线编辑。

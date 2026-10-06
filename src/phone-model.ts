@@ -9,6 +9,7 @@ import { devices, type DeviceId } from "./devices";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { bakeGeometry, separateCameraPlate } from "./model-geometry";
 import * as THREE from "three";
+import { publicAsset } from "./assets";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import type { Settings } from "./types";
@@ -31,10 +32,10 @@ export async function loadPhoneModel(
   if (device === "iphone-air") return loadAirModel(display);
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   const config = devices[device];
-  const draco = new DRACOLoader().setDecoderPath("/draco/");
+  const draco = new DRACOLoader().setDecoderPath(publicAsset("draco/"));
   loader.setDRACOLoader(draco);
   const gltf = await loader
-    .loadAsync(config.file)
+    .loadAsync(publicAsset(config.file))
     .finally(() => draco.dispose());
   gltf.scene.rotation.y = Math.PI;
   gltf.scene.updateMatrixWorld(true);

@@ -1,5 +1,6 @@
 import type { Settings, CustomColors } from "./types";
 import type { Keyframe } from "./animation";
+import { createId } from "./id";
 
 const projectKey = "frame-studio.project.v1";
 export interface SavedProject {
@@ -47,7 +48,7 @@ function openDatabase() {
 
 export async function saveAsset(file: Blob): Promise<string> {
   const db = await openDatabase();
-  const id = crypto.randomUUID();
+  const id = createId();
   // Publish the asset reference only after the blob transaction is durable.
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction("assets", "readwrite");

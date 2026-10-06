@@ -1,4 +1,6 @@
 import { Timeline } from "./Timeline";
+import { createId } from "./id";
+import { publicAsset } from "./assets";
 import {
   capturePose,
   curves,
@@ -323,7 +325,7 @@ export default function App() {
     setTime(frameTime);
     const existing = frames.find((k) => Math.abs(k.time - frameTime) < 0.025);
     const key: Keyframe = {
-      id: existing?.id ?? crypto.randomUUID(),
+      id: existing?.id ?? createId(),
       time: existing?.time ?? frameTime,
       pose: capturePose(s),
       curve: structuredClone(existing?.curve ?? curves["平滑进出"]),
@@ -650,7 +652,7 @@ export default function App() {
                     <img src={screenshot} alt="已上传截图缩略图" />
                   )
                 ) : (
-                  <img src="/alpine.jpg" alt="山野示例缩略图" />
+                  <img src={publicAsset("alpine.jpg")} alt="山野示例缩略图" />
                 )}
               </div>
               <div>
@@ -1188,7 +1190,7 @@ export default function App() {
             <div className="toolbar-right">
               <a
                 className="icon-button"
-                href="/models/attribution.html"
+                href={publicAsset("models/attribution.html")}
                 target="_blank"
                 rel="noreferrer"
                 title="模型来源与许可"

@@ -1,5 +1,6 @@
 import { devices } from "./devices";
 import * as THREE from "three";
+import { publicAsset } from "./assets";
 import { createStudioEnvironment, createDisplayMaterial } from "./studio";
 import {
   loadPhoneModel,
@@ -47,7 +48,7 @@ export async function demoScreen() {
   x.fillStyle = "#f6f3e9";
   x.fillRect(0, 0, c.width, c.height);
   try {
-    const im = await loadImage("/alpine.jpg");
+    const im = await loadImage(publicAsset("alpine.jpg"));
     cover(x, im, 0, 0, 1206, 1720);
   } catch {
     const g = x.createLinearGradient(0, 0, 1206, 1700);
