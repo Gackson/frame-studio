@@ -1,6 +1,14 @@
 import { useId } from "react";
 import { ChevronDown, RotateCcw, Check, Plus } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
+export function Select({ children, ...props }: ComponentProps<"select">) {
+  return (
+    <span className="select-control">
+      <select {...props}>{children}</select>
+      <ChevronDown size={12} aria-hidden="true" />
+    </span>
+  );
+}
 export function CustomColorSlot({
   label,
   color,

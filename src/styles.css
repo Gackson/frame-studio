@@ -48,18 +48,32 @@ input:disabled {
   cursor: not-allowed;
 }
 button,
-a,
-input,
-select {
+a {
   outline-offset: 4px;
 }
 button:focus-visible,
 a:focus-visible,
-input:focus-visible,
-select:focus-visible,
 canvas:focus-visible,
 summary:focus-visible {
   outline: 2px solid var(--accent);
+}
+input:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.number-field:has(input:focus-visible) {
+  border-color: var(--accent);
+}
+.number-field input:focus-visible,
+input[type="range"]:focus-visible {
+  box-shadow: none;
+}
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--accent);
 }
 button {
   transition:
@@ -96,6 +110,16 @@ button:hover {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   z-index: 3;
+}
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+.github-link:hover {
+  color: var(--accent);
+  background: var(--soft);
 }
 .brand {
   display: flex;
@@ -340,6 +364,25 @@ button:hover {
   font-size: 10px;
   color: var(--muted);
   padding: 5px 7px;
+}
+.select-control {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.select-control > select {
+  width: 100%;
+  appearance: none;
+  padding-right: 32px;
+  cursor: pointer;
+}
+.select-control > svg {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
 }
 .style-options {
   display: grid;
@@ -1198,6 +1241,19 @@ input[type="color"]::-webkit-color-swatch {
   background: var(--surface);
   color: inherit;
   font-size: 12px;
+}
+.model-attribution {
+  display: block;
+  width: fit-content;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  transition: color 0.18s;
+}
+.model-attribution:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 .device-note {
   font-size: 10px;

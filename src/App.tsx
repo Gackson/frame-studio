@@ -19,7 +19,6 @@ import {
   ImagePlus,
   Maximize,
   Minus,
-  Info,
   Plus,
   RotateCcw,
   Smartphone,
@@ -29,6 +28,7 @@ import {
 } from "lucide-react";
 import {
   Section,
+  Select,
   Slider,
   Toggle,
   ResetButton,
@@ -548,11 +548,31 @@ export default function App() {
       )}
     >
       <header className="app-header">
-        <a href="/" className="brand" aria-label="Frame Studio 首页">
-          <span>
-            frame<span className="brand-light">studio</span>
-          </span>
-        </a>
+        <div className="brand-group">
+          <a href="/" className="brand" aria-label="Frame Studio 首页">
+            <span>
+              frame<span className="brand-light">studio</span>
+            </span>
+          </a>
+          <a
+            className="icon-button github-link"
+            href="https://github.com/Gackson/frame-studio"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="在 GitHub 查看 Frame Studio"
+            aria-label="在 GitHub 查看 Frame Studio"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.09c-3.13.68-3.79-1.33-3.79-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.69.08-.69 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.63 1.22 3.27.93.1-.72.39-1.22.71-1.5-2.5-.28-5.13-1.25-5.13-5.56 0-1.23.44-2.23 1.16-3.02-.12-.28-.5-1.43.11-2.98 0 0 .95-.3 3.1 1.15a10.8 10.8 0 0 1 5.63 0c2.15-1.45 3.09-1.15 3.09-1.15.62 1.55.23 2.7.12 2.98.72.79 1.15 1.79 1.15 3.02 0 4.32-2.63 5.28-5.14 5.56.4.35.76 1.03.76 2.08v3.09c0 .3.2.65.77.54A11.25 11.25 0 0 0 12 .75Z" />
+            </svg>
+          </a>
+        </div>
         <div className="header-actions">
           <label className="export-background">
             <input
@@ -599,7 +619,7 @@ export default function App() {
           onPointerDownCapture={() => setPlaying(false)}
         >
           <Section title="设备机型">
-            <select
+            <Select
               className="device-select"
               aria-label="设备机型"
               value={s.device}
@@ -612,7 +632,16 @@ export default function App() {
                   {d.name}
                 </option>
               ))}
-            </select>
+            </Select>
+            <a
+              className="model-attribution"
+              href={`${publicAsset("models/attribution.html")}#${s.device}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`查看 ${devices[s.device].name} 模型署名与许可`}
+            >
+              CC BY 4.0: {devices[s.device].author}
+            </a>
           </Section>
           <Section title="屏幕内容">
             <div className="paste-actions">
@@ -673,7 +702,7 @@ export default function App() {
             </div>
             <div className="inline-setting">
               <span>截图适配</span>
-              <select
+              <Select
                 aria-label="截图适配"
                 value={s.fit}
                 onChange={(e) =>
@@ -682,7 +711,7 @@ export default function App() {
               >
                 <option value="cover">填满屏幕</option>
                 <option value="contain">完整显示</option>
-              </select>
+              </Select>
             </div>
           </Section>
           <Section title="渲染风格">
@@ -1036,7 +1065,7 @@ export default function App() {
           <Section title="材质与光影">
             <div className="inline-setting">
               <span>表面材质</span>
-              <select
+              <Select
                 aria-label="表面材质"
                 value={s.material === "realistic" ? s.metalFinish : s.material}
                 onChange={(e) => {
@@ -1062,7 +1091,7 @@ export default function App() {
                 </option>
                 <option value="clay">Clay</option>
                 <option value="glow">Glow</option>
-              </select>
+              </Select>
             </div>
             <div className="inline-setting">
               <span>机身颜色</span>
@@ -1188,16 +1217,6 @@ export default function App() {
               </select>
             </div>
             <div className="toolbar-right">
-              <a
-                className="icon-button"
-                href={publicAsset("models/attribution.html")}
-                target="_blank"
-                rel="noreferrer"
-                title="模型来源与许可"
-                aria-label="模型来源与许可"
-              >
-                <Info size={15} />
-              </a>
               <label className="ratio-control">
                 <Maximize size={13} />
                 <select
